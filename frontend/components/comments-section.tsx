@@ -6,7 +6,7 @@ import { formatDistanceToNow } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { Loader2, Send, User, MessageSquare } from "lucide-react";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5500";
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5500").replace(/\/$/, "");
 
 interface Comment {
   _id: string;
