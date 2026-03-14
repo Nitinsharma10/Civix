@@ -19,6 +19,28 @@ const issueSchema = new mongoose.Schema(
       trim: true,
     },
     location: {
+      lat: { type: Number },
+      lng: { type: Number },
+    },
+    locationText: {
+      type: String,
+      trim: true,
+    },
+    category: {
+      type: String,
+      trim: true,
+    },
+    severity: {
+      type: String,
+      enum: ['Critical', 'High', 'Medium', 'Low', 'None'],
+      default: 'None',
+    },
+    confidence: {
+      type: Number,
+      min: 0,
+      max: 1,
+    },
+    department: {
       type: String,
       trim: true,
     },

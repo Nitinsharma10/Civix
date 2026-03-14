@@ -19,6 +19,7 @@ import { LocationPicker, type PickedLocation } from "@/components/location-picke
 import { SpeechToTextButton } from "@/components/speech-to-text-button";
 import { useGeolocation } from "@/lib/hooks/use-geolocation";
 import { DuplicateWarningModal, type DuplicateMatch } from "@/components/duplicate-warning-modal";
+import { ProcessingStatusIndicator } from "@/components/processing-status-indicator";
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5500").replace(/\/$/, "");
 
@@ -32,6 +33,25 @@ const suggestedDepartments = [
   "Other",
 ];
 
+const severityOptions = ["Low", "Medium", "High", "Critical"] as const;
+
+function severityFromScore(score: unknown): string {
+  const numeric = Number(score);
+  if (!Number.isFinite(numeric)) return "";
+  if (numeric >= 8) return "Critical";
+  if (numeric >= 5) return "High";
+  if (numeric >= 3) return "Medium";
+  if (numeric >= 1) return "Low";
+  return "Low";
+}
+
+function severityToScore(severity: string): number | null {
+  if (severity === "Critical") return 9;
+  if (severity === "High") return 7;
+  if (severity === "Medium") return 4;
+  if (severity === "Low") return 2;
+  return null;
+}
 const impactScopeOptions = ["Individual", "Locality", "Ward", "City-wide"];
 const urgencyOptions = ["Immediate", "Within 24hrs", "Within a Week", "Routine"];
 const estimatedResolutionOptions = [
@@ -57,6 +77,8 @@ interface FormErrors {
 interface AIFields {
   imageUrl: string | null;
   predictedIssueType: string;
+  severity: string;
+  confidence: number | string;
   severityScore: number | string;
   impactScope: string;
   urgency: string;
@@ -76,6 +98,11 @@ type Stage = "form" | "analyzing" | "review";
 // Must be slightly longer than the backend axios timeout (90 s) so the backend
 // error is surfaced rather than a raw network abort.
 const PREVIEW_FETCH_TIMEOUT_MS = 100_000; // 100 s
+const AI_RUNNING_MESSAGE = "Running AI analysis to classify the issue...";
+const ML_HIGH_MESSAGE = "High confidence detected — using ML model to estimate severity...";
+const ML_LOW_MESSAGE = "Low confidence detected — delegating analysis to AI agent...";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function PostIssue({ onSuccess }: PostIssueProps) {
   const { getToken } = useAuth();
@@ -97,6 +124,7 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
   const [webhookFailed, setWebhookFailed] = useState(false);
   const [webhookErrorCode, setWebhookErrorCode] = useState<string | null>(null);
   const [analysisTimedOut, setAnalysisTimedOut] = useState(false);
+  const [processingStatusMessage, setProcessingStatusMessage] = useState(AI_RUNNING_MESSAGE);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[]>([]);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
@@ -193,6 +221,7 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
     setWebhookFailed(false);
     setWebhookErrorCode(null);
     setAnalysisTimedOut(false);
+    setProcessingStatusMessage(AI_RUNNING_MESSAGE);
 
     // Set up an AbortController so we never hang forever
     const controller = new AbortController();
@@ -251,16 +280,49 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
         setWebhookErrorCode(responseData?.webhookError ?? null);
       }
 
+      const mlConfidence = Number(responseData?.mlConfidence ?? responseData?.confidence);
+      if (Number.isFinite(mlConfidence)) {
+        setProcessingStatusMessage(
+          mlConfidence >= 0.8 ? ML_HIGH_MESSAGE : ML_LOW_MESSAGE
+        );
+        await sleep(900);
+      }
+
       setAiFields({
-        imageUrl: responseData?.imageUrl ?? null,
-        predictedIssueType: responseData?.predictedIssueType ?? "",
-        severityScore: responseData?.severityScore ?? "",
-        impactScope: responseData?.impactScope ?? "",
-        urgency: responseData?.urgency ?? "",
-        priorityScore: responseData?.priorityScore ?? "",
-        suggestedDepartment: responseData?.suggestedDepartment ?? "",
-        estimatedResolution: responseData?.estimatedResolution ?? "",
-        description: responseData?.description ?? form.description.trim(),
+  imageUrl: responseData?.imageUrl ?? null,
+
+  // Issue classification
+  predictedIssueType:
+    responseData?.issueType ??
+    responseData?.predictedIssueType ??
+    "",
+
+  // Severity
+  severity:
+    responseData?.severity ??
+    severityFromScore(responseData?.severityScore),
+
+  severityScore: responseData?.severityScore ?? "",
+
+  // Confidence
+  confidence: responseData?.confidence ?? "",
+
+  // Department routing
+  suggestedDepartment:
+    responseData?.department ??
+    responseData?.suggestedDepartment ??
+    "",
+
+  // Impact metrics
+  impactScope: responseData?.impactScope ?? "",
+  urgency: responseData?.urgency ?? "",
+  priorityScore: responseData?.priorityScore ?? "",
+
+  // Resolution estimate
+  estimatedResolution: responseData?.estimatedResolution ?? "",
+
+  // Description
+  description: responseData?.description ?? form.description.trim(),
       });
       setStage("review");
     } catch (err: unknown) {
@@ -271,9 +333,12 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
       // Network-level failure or timeout — still go to review with original fields
       setWebhookFailed(true);
       setWebhookErrorCode(isAbort ? "TIMEOUT" : "NETWORK_ERROR");
+      setProcessingStatusMessage(AI_RUNNING_MESSAGE);
       setAiFields({
         imageUrl: null,
         predictedIssueType: "",
+        severity: "",
+        confidence: "",
         severityScore: "",
         impactScope: "",
         urgency: "",
@@ -332,19 +397,45 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
       const gps = gpsCoordsRef.current;
 
       const payload: Record<string, unknown> = {
-        title: form.title.trim(),
-        description: aiFields.description,
-        location: form.location.trim() || null,
-        imageUrl: aiFields.imageUrl,
-        predictedIssueType: aiFields.predictedIssueType || null,
-        severityScore: aiFields.severityScore !== "" ? aiFields.severityScore : null,
-        impactScope: aiFields.impactScope || null,
-        urgency: aiFields.urgency || null,
-        priorityScore: aiFields.priorityScore !== "" ? aiFields.priorityScore : null,
-        suggestedDepartment: aiFields.suggestedDepartment || null,
-        estimatedResolution: aiFields.estimatedResolution || null,
-        lat: gps?.lat ?? null,
-        lng: gps?.lng ?? null,
+  title: form.title.trim(),
+  description: aiFields.description,
+
+  location: form.location.trim() || null,
+  imageUrl: aiFields.imageUrl || null,
+
+  // Issue classification
+  predictedIssueType: aiFields.predictedIssueType || null,
+
+  // Severity
+  severity: aiFields.severity || null,
+  severityScore:
+    aiFields.severityScore !== ""
+      ? Number(aiFields.severityScore)
+      : severityToScore(aiFields.severity),
+
+  // Confidence
+  confidence:
+    aiFields.confidence !== ""
+      ? Number(aiFields.confidence)
+      : null,
+
+  // Impact metrics
+  impactScope: aiFields.impactScope || null,
+  urgency: aiFields.urgency || null,
+  priorityScore:
+    aiFields.priorityScore !== ""
+      ? Number(aiFields.priorityScore)
+      : null,
+
+  // Department routing
+  suggestedDepartment: aiFields.suggestedDepartment || null,
+
+  // Resolution estimate
+  estimatedResolution: aiFields.estimatedResolution || null,
+
+  // GPS coordinates
+  lat: gps?.lat ?? null,
+  lng: gps?.lng ?? null,
       };
 
       const res = await fetch(`${BACKEND_URL}/api/issues`, {
@@ -393,6 +484,7 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
     setWebhookFailed(false);
     setWebhookErrorCode(null);
     setAnalysisTimedOut(false);
+    setProcessingStatusMessage(AI_RUNNING_MESSAGE);
     gpsCoordsRef.current = null;
   }
 
@@ -427,6 +519,7 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
                 ? "The AI is taking longer than expected. Hang tight or cancel and retry."
                 : "Our AI is classifying and enhancing your report. This may take up to 90 seconds."}
             </p>
+            <ProcessingStatusIndicator message={processingStatusMessage} />
             {elapsedSeconds > 0 && (
               <p className="text-xs tabular-nums text-muted-foreground/70">
                 {elapsedSeconds}s elapsed
@@ -508,20 +601,27 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
           {/* Severity + Priority */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1">
-              <label htmlFor="ai-severityScore" className="text-sm font-medium flex items-center gap-1.5">
-                Severity Score <span className="text-muted-foreground font-normal">(1–10)</span>
-                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI</span>
+              <label htmlFor="ai-severity" className="text-sm font-medium flex items-center gap-1.5">
+                Severity
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI / ML</span>
               </label>
-              <input
-                id="ai-severityScore"
-                name="severityScore"
-                type="number"
-                min={1}
-                max={10}
-                value={aiFields.severityScore}
+              <select
+                id="ai-severity"
+                name="severity"
+                value={aiFields.severity}
                 onChange={handleAiFieldChange}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-primary/30"
-              />
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Select severity…</option>
+                {severityOptions.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Confidence: {aiFields.confidence !== "" ? Number(aiFields.confidence).toFixed(2) : "N/A"}
+              </p>
             </div>
 
             <div className="space-y-1">

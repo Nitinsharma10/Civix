@@ -65,10 +65,10 @@ const SEVERITY_OPTIONS = [
 ];
 
 const LEGEND = [
-  { color: MARKER_COLORS.reported, label: "Open / Unrepaired" },
-  { color: MARKER_COLORS.in_progress, label: "In Progress" },
-  { color: MARKER_COLORS.resolved, label: "Resolved (hidden by default)" },
-  { color: "#3b82f6", label: "Your Location" },
+  { color: "#dc2626", label: "Critical severity" },
+  { color: "#f87171", label: "High severity" },
+  { color: "#3b82f6", label: "Low / Medium severity" },
+  { color: "#1d4ed8", label: "Your Location" },
 ];
 
 // ── Status styles ─────────────────────────────────────────────────────────
@@ -308,7 +308,9 @@ function IssueListPanel({
                 {(issue.location || issue.coordinates) && (
                   <p className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground truncate">
                     <MapPin className="h-2.5 w-2.5 shrink-0" />
-                    {issue.location ??
+                    {(typeof issue.location === "string"
+                      ? issue.location
+                      : issue.locationText) ??
                       `${issue.coordinates!.lat.toFixed(4)}, ${issue.coordinates!.lng.toFixed(4)}`}
                   </p>
                 )}
@@ -468,21 +470,25 @@ export default function AdminMapPage() {
   const { visibleIds, filteredIssues } = useMemo(() => {
     const q = search.toLowerCase().trim();
 
-    const filtered = issues.filter((issue) => {
-      if (!issue.coordinates) return false;
+      const filtered = issues.filter((issue) => {
+        if (!issue.coordinates) return false;
+        const locationSearchText =
+          typeof issue.location === "string"
+            ? issue.location.toLowerCase()
+            : issue.locationText?.toLowerCase() ?? "";
 
       // Resolved issues are hidden from the map by default.
       // They only appear when the admin explicitly selects the "Resolved" filter.
       if (issue.status === "resolved" && filterStatus !== "resolved")
         return false;
 
-      if (
-        q &&
-        !issue.title.toLowerCase().includes(q) &&
-        !issue.description.toLowerCase().includes(q) &&
-        !(issue.location ?? "").toLowerCase().includes(q)
-      )
-        return false;
+        if (
+          q &&
+          !issue.title.toLowerCase().includes(q) &&
+          !issue.description.toLowerCase().includes(q) &&
+          !locationSearchText.includes(q)
+        )
+          return false;
 
       if (filterStatus && issue.status !== filterStatus) return false;
 

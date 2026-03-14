@@ -13,10 +13,15 @@ export interface AdminIssue {
   _id: string;
   title: string;
   description: string;
-  location?: string;
+  location?: string | { lat: number; lng: number };
+  locationText?: string;
   imageUrl?: string;
+  category?: string;
   predictedIssueType?: string;
+  severity?: string;
+  confidence?: number;
   severityScore?: number;
+  department?: string;
   suggestedDepartment?: string;
   status: "reported" | "approved" | "in_progress" | "resolved";
   upvotes: string[];

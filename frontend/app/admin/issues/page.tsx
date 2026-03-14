@@ -3,13 +3,9 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Search,
-  Pencil,
-  CheckCircle2,
   Loader2,
   AlertCircle,
   RefreshCw,
-  ImageIcon,
-  ChevronUp,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,35 +15,11 @@ import {
   type AdminIssue,
 } from "@/components/admin/issue-edit-modal";
 import { ResolveWithProofModal } from "@/components/admin/resolve-with-proof-modal";
+import { IssueListItem } from "@/components/admin/issue-list-item";
 
 const BACKEND_URL = (
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5500"
 ).replace(/\/$/, "");
-
-const STATUS_STYLES: Record<AdminIssue["status"], string> = {
-  reported:
-    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  approved:
-    "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  in_progress:
-    "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
-  resolved:
-    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-};
-
-const STATUS_LABELS: Record<AdminIssue["status"], string> = {
-  reported: "Reported",
-  approved: "Approved",
-  in_progress: "In Progress",
-  resolved: "Resolved",
-};
-
-const SEVERITY_COLOR = (score?: number) => {
-  if (!score) return "text-muted-foreground";
-  if (score >= 7) return "text-red-600 dark:text-red-400 font-semibold";
-  if (score >= 4) return "text-orange-500 dark:text-orange-400 font-semibold";
-  return "text-green-600 dark:text-green-400";
-};
 
 const DEPARTMENTS = [
   "Electrical",
@@ -125,11 +97,15 @@ export default function AdminIssuesPage() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return issues.filter((issue) => {
+      const locationSearchText =
+        typeof issue.location === "string"
+          ? issue.location.toLowerCase()
+          : issue.locationText?.toLowerCase() ?? "";
       if (
         q &&
         !issue.title.toLowerCase().includes(q) &&
         !issue.description.toLowerCase().includes(q) &&
-        !(issue.location ?? "").toLowerCase().includes(q)
+        !locationSearchText.includes(q)
       )
         return false;
       if (filterStatus && issue.status !== filterStatus) return false;
@@ -305,9 +281,9 @@ export default function AdminIssuesPage() {
           </div>
         )}
 
-        {/* ── Issues Table ── */}
+        {/* ── Issues List ── */}
         {!loading && !error && (
-          <div className="rounded-xl border border-border bg-background overflow-hidden shadow-sm">
+          <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
             {filtered.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-16 text-center">
                 <Search className="h-8 w-8 text-muted-foreground/40" />
@@ -316,158 +292,21 @@ export default function AdminIssuesPage() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/40">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Issue
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">
-                        Location
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Severity
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
-                        Dept
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">
-                        Priority
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {filtered.map((issue) => {
-                      const priority =
-                        (issue.severityScore ?? 0) +
-                        (issue.upvotes?.length ?? 0) * 0.5;
-                      return (
-                        <tr
-                          key={issue._id}
-                          className="hover:bg-muted/30 transition-colors"
-                        >
-                          {/* Issue: image + title + description */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              {/* Image box */}
-                              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted flex items-center justify-center">
-                                {issue.imageUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={issue.imageUrl}
-                                    alt={issue.title}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <ImageIcon className="h-5 w-5 text-muted-foreground/40" />
-                                )}
-                              </div>
-
-                              {/* Text */}
-                              <div className="min-w-0">
-                                <p className="font-medium text-foreground line-clamp-1 max-w-[180px]">
-                                  {issue.title}
-                                </p>
-                                <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1 max-w-[180px]">
-                                  {issue.description}
-                                </p>
-                                {issue.suggestedDepartment && (
-                                  <span className="mt-1 inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                                    {issue.suggestedDepartment}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Location */}
-                          <td className="px-4 py-3 hidden sm:table-cell">
-                            <span className="text-xs text-muted-foreground">
-                              {issue.location ?? "—"}
-                            </span>
-                          </td>
-
-                          {/* Severity */}
-                          <td className="px-4 py-3">
-                            <span
-                              className={cn(
-                                "text-sm",
-                                SEVERITY_COLOR(issue.severityScore)
-                              )}
-                            >
-                              {issue.severityScore != null
-                                ? issue.severityScore.toFixed(1)
-                                : "—"}
-                            </span>
-                          </td>
-
-                          {/* Department */}
-                          <td className="px-4 py-3 hidden md:table-cell">
-                            <span className="text-xs text-muted-foreground">
-                              {issue.suggestedDepartment ?? "—"}
-                            </span>
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-4 py-3">
-                            <span
-                              className={cn(
-                                "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                                STATUS_STYLES[issue.status]
-                              )}
-                            >
-                              {STATUS_LABELS[issue.status]}
-                            </span>
-                          </td>
-
-                          {/* Priority score */}
-                          <td className="px-4 py-3 hidden lg:table-cell">
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <ChevronUp className="h-3 w-3" />
-                              {priority.toFixed(1)}
-                            </div>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-2">
-                              {/* Edit */}
-                              <button
-                                onClick={() => setEditingIssue(issue)}
-                                title="Edit issue"
-                                className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
-                              >
-                                <Pencil className="h-3 w-3" />
-                                <span className="hidden sm:inline">Edit</span>
-                              </button>
-
-                              {/* Mark Resolved */}
-                              {issue.status !== "resolved" && (
-                                <button
-                                  onClick={() => setResolvingIssue(issue)}
-                                  title="Resolve with proof"
-                                  className="flex items-center gap-1.5 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition-colors"
-                                >
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  <span className="hidden sm:inline">
-                                    Resolve
-                                  </span>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                {filtered.map((issue) => (
+                  <IssueListItem
+                    key={issue._id}
+                    title={issue.title}
+                    description={issue.description}
+                    category={issue.category || issue.predictedIssueType || "Uncategorized"}
+                    department={issue.department || issue.suggestedDepartment || "Unassigned"}
+                    severityScore={issue.severityScore ?? 0}
+                    createdAt={issue.createdAt}
+                    onEdit={() => setEditingIssue(issue)}
+                    onResolve={() => setResolvingIssue(issue)}
+                    canResolve={issue.status !== "resolved"}
+                  />
+                ))}
               </div>
             )}
           </div>

@@ -3,6 +3,7 @@
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
 import type { AdminIssue } from "@/components/admin/issue-edit-modal";
+import { getSeverityMarkerColor, resolveSeverity } from "@/lib/severity";
 
 // ── Marker colour per status ──────────────────────────────────────────────
 export const MARKER_COLORS: Record<string, string> = {
@@ -55,8 +56,9 @@ function makeUserIcon(L: typeof import("leaflet")) {
 
 // ── Popup HTML builder ────────────────────────────────────────────────────
 function buildPopupHtml(issue: AdminIssue, isUpdating = false): string {
-  const color = MARKER_COLORS[issue.status] ?? "#6b7280";
+  const statusColor = MARKER_COLORS[issue.status] ?? "#6b7280";
   const statusLabel = STATUS_LABELS[issue.status] ?? issue.status;
+  const severityLevel = resolveSeverity(issue.severity, issue.severityScore);
 
   const imgHtml = issue.imageUrl
     ? `<img src="${issue.imageUrl}" alt=""
@@ -70,7 +72,7 @@ function buildPopupHtml(issue: AdminIssue, isUpdating = false): string {
     : "";
 
   const metaItems = [
-    issue.severityScore != null ? `⚡ ${issue.severityScore.toFixed(1)}` : null,
+    `⚡ ${severityLevel}`,
     issue.suggestedDepartment ? `🏢 ${issue.suggestedDepartment}` : null,
     `▲ ${issue.upvotes?.length ?? 0}`,
   ]
@@ -118,7 +120,7 @@ function buildPopupHtml(issue: AdminIssue, isUpdating = false): string {
         ${escHtml(issue.description)}
       </p>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-        <span style="background:${color}22;color:${color};border:1px solid ${color}55;
+        <span style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}55;
                      border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;">
           ${statusLabel}
         </span>
@@ -265,7 +267,7 @@ export function AdminIssueMap({
       for (const issue of issues) {
         if (!issue.coordinates) continue;
         const { lat, lng } = issue.coordinates;
-        const color = MARKER_COLORS[issue.status] ?? "#6b7280";
+        const color = getSeverityMarkerColor(issue.severity, issue.severityScore);
         const icon = makePinIcon(L, color);
         const popupHtml = buildPopupHtml(
           issue,

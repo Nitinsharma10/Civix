@@ -25,7 +25,7 @@ A full-stack civic engagement platform where community residents can **report**,
 
 ## 🔍 Overview
 
-Micro-Task bridges the gap between residents and local civic administration. Users submit issues with photos and GPS locations; an **AI pipeline (n8n + LLM)** automatically classifies severity, predicts the responsible department, and flags near-duplicate reports. Admins manage issues through a dedicated panel and upload proof when resolving them — residents then vote to verify the fix is real.
+Micro-Task bridges the gap between residents and local civic administration. Users submit issues with photos and GPS locations; a **hybrid AI pipeline** uses local BLIP ML for severity estimation and always calls **n8n + LLM** for category/department analysis. Admins manage issues through a dedicated panel and upload proof when resolving them — residents then vote to verify the fix is real.
 
 ---
 
@@ -75,6 +75,7 @@ Micro-Task bridges the gap between residents and local civic administration. Use
 | **MongoDB + Mongoose** | Database — issues, users, comments, events |
 | **Clerk Express SDK** | JWT verification and auth middleware |
 | **Cloudinary** | Image upload and CDN hosting |
+| **FastAPI + HuggingFace BLIP** | Local image captioning and severity estimation (`Salesforce/blip-image-captioning-base`) |
 | **n8n** | No-code AI workflow — calls LLM to enrich issue data |
 | **Axios** | Webhook HTTP calls with configurable timeouts |
 
@@ -92,7 +93,8 @@ Micro-Task bridges the gap between residents and local civic administration. Use
 ┌─────────────────────────────────────────────────────────┐
 │                  Express Backend (:5500)                  │
 │                                                          │
-│  POST /api/issues/preview  ──► n8n Webhook (AI)          │
+│  POST /api/issues/preview  ──► BLIP ML Severity Service  │
+│                          └──► n8n Webhook (always)       │
 │  POST /api/issues          ──► MongoDB                   │
 │  PATCH /api/issues/:id     ──► MongoDB                   │
 │  POST /api/issues/:id/resolve ──► Cloudinary → MongoDB   │
@@ -107,81 +109,20 @@ Micro-Task bridges the gap between residents and local civic administration. Use
 
 Issue Submission Flow:
   1. User fills form (title, description, optional image + GPS)
-  2. /preview  → uploads image to Cloudinary → hits n8n webhook
-  3. n8n LLM   → returns category / severity / department
-  4. UI shows AI preview for user review/edit
-  5. /issues   → saves final confirmed data to MongoDB
+  2. `/preview` uploads image to Cloudinary
+  3. Backend sends image to local BLIP ML service (`/analyze-severity`)
+  4. Backend always calls n8n webhook for category/department analysis
+  5. If ML confidence ≥ 0.80, ML severity overrides n8n severity
+  6. If ML confidence < 0.80 (or ML fails), n8n severity is used
+  7. UI shows preview fields for user review/edit
+  8. `/issues` saves confirmed fields to MongoDB
 ```
 
 ---
 
 ## 📁 Project Structure
 
-```
-Micro-Task/
-├── backend/
-│   ├── config/
-│   │   ├── db.js                  # MongoDB connection (native driver)
-│   │   └── cloudinary.js          # Cloudinary SDK config
-│   ├── middleware/
-│   │   ├── auth.js                # Clerk requireAuth / getAuth helpers
-│   │   └── upload.js              # Multer (in-memory) file upload
-│   ├── models/
-│   │   ├── Issue.model.js         # Mongoose schema (legacy reference)
-│   │   ├── User.model.js
-│   │   └── Comment.model.js
-│   ├── routes/
-│   │   ├── issue.routes.js        # All issue CRUD + voting + verification
-│   │   ├── user.routes.js         # Sync user from Clerk, /me
-│   │   └── event.routes.js        # Community events
-│   ├── utils/
-│   │   ├── cloudinaryUpload.js    # Buffer → Cloudinary upload helper
-│   │   └── points.js              # Designation tiers + awardPoints()
-│   ├── .env                       # Backend secrets (never commit)
-│   └── index.js                   # Express app entry point
-│
-└── frontend/
-    ├── app/
-    │   ├── (dashboard)/
-    │   │   ├── layout.tsx         # Shared dashboard shell + nav
-    │   │   ├── feed/page.tsx      # Community issue feed
-    │   │   ├── map/page.tsx       # Interactive map page
-    │   │   └── events/page.tsx    # Community events page
-    │   ├── admin/
-    │   │   ├── layout.tsx         # Admin shell (guard + sidebar)
-    │   │   ├── issues/page.tsx    # Admin issue management table
-    │   │   ├── map/page.tsx       # Admin map with inline controls
-    │   │   └── analytics/page.tsx # Charts and stats
-    │   ├── api/
-    │   │   └── speech-to-text/route.ts  # Proxies audio to Sarvam AI
-    │   ├── layout.tsx             # Root layout (Clerk provider)
-    │   └── page.tsx               # Landing / sign-in redirect
-    ├── components/
-    │   ├── map/
-    │   │   ├── issue-map.tsx      # Leaflet map for residents (auto-zoom)
-    │   │   └── admin-issue-map.tsx # Leaflet map with status buttons
-    │   ├── admin/
-    │   │   ├── issue-edit-modal.tsx
-    │   │   ├── resolve-with-proof-modal.tsx
-    │   │   ├── admin-guard.tsx
-    │   │   └── admin-sidebar.tsx
-    │   ├── issue-card.tsx         # Feed card (upvote, Read More, verify)
-    │   ├── post-issue.tsx         # Two-step issue submission form
-    │   ├── location-picker.tsx    # Map-based GPS picker
-    │   ├── comments-section.tsx
-    │   ├── duplicate-warning-modal.tsx
-    │   ├── speech-to-text-button.tsx
-    │   └── image-lightbox.tsx
-    ├── lib/
-    │   ├── hooks/
-    │   │   ├── use-geolocation.ts  # Browser GPS hook (error handling)
-    │   │   ├── use-profile.ts
-    │   │   ├── use-user-role.ts
-    │   │   └── use-speech-to-text.ts
-    │   └── utils.ts
-    ├── .env                       # Frontend secrets (never commit)
-    └── next.config.ts
-```
+
 
 ---
 
@@ -263,6 +204,21 @@ CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>
 CLOUDINARY_CLOUD_NAME=<cloud_name>
 CLOUDINARY_API_KEY=<api_key>
 CLOUDINARY_API_SECRET=<api_secret>
+
+# AI integrations
+N8N_WEBHOOK_URL=https://<your-n8n-host>/webhook/<id>
+ML_SERVICE_URL=http://127.0.0.1:8000/analyze-severity
+ML_CONFIDENCE_THRESHOLD=0.80
+```
+
+### Python ML Service — `backend/ml-service`
+
+```bash
+cd Micro-Task/backend/ml-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 ### Frontend — `frontend/.env`
@@ -295,7 +251,7 @@ SARVAM_API_KEY=sk_...
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `POST` | `/api/issues/preview` | ✅ Required | Upload image to Cloudinary + trigger n8n AI enrichment. Returns AI fields for user review. |
+| `POST` | `/api/issues/preview` | ✅ Required | Upload image to Cloudinary, run local BLIP severity analysis, always call n8n, and override severity when ML confidence is high. |
 | `POST` | `/api/issues` | ✅ Required | Save a confirmed issue to MongoDB. |
 | `GET` | `/api/issues` | ❌ Public | List all issues (newest first) with reporter info joined. |
 | `GET` | `/api/issues/pending-verifications` | ❌ Public | List resolved issues awaiting resident verification. |

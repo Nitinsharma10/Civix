@@ -4,9 +4,10 @@ import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useCallback } from "react";
 import type { Issue } from "@/components/issue-card";
 import type { AdminIssue } from "@/components/admin/issue-edit-modal";
+import { getSeverityMarkerColor, resolveSeverity } from "@/lib/severity";
 
 // Marker colors per status
-const MARKER_COLORS: Record<string, string> = {
+const STATUS_COLORS: Record<string, string> = {
   reported: "#ef4444",    // red
   approved: "#f97316",    // orange
   in_progress: "#f97316", // orange
@@ -63,13 +64,11 @@ function makeMarkerIcon(L: typeof import("leaflet"), color: string, isUser = fal
 // Build popup HTML for an issue
 function buildPopup(issue: AnyIssue): string {
   const admin = issue as AdminIssue;
-  const color = MARKER_COLORS[issue.status] ?? "#6b7280";
+  const statusColor = STATUS_COLORS[issue.status] ?? "#6b7280";
+  const severityLevel = resolveSeverity((issue as { severity?: string }).severity, admin.severityScore);
   const statusLabel = STATUS_LABELS[issue.status] ?? issue.status;
 
-  const severityBadge =
-    admin.severityScore != null
-      ? `<span style="font-size:11px;color:#6b7280;">Severity: <strong>${admin.severityScore.toFixed(1)}</strong></span>`
-      : "";
+  const severityBadge = `<span style="font-size:11px;color:#6b7280;">Severity: <strong>${severityLevel}</strong></span>`;
 
   const deptBadge =
     admin.suggestedDepartment
@@ -80,8 +79,13 @@ function buildPopup(issue: AnyIssue): string {
     ? `<img src="${issue.imageUrl}" alt="issue" style="width:100%;height:100px;object-fit:cover;border-radius:6px;margin-bottom:8px;" />`
     : "";
 
-  const locationHtml = issue.location
-    ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;">📍 ${issue.location}</div>`
+  const locationRaw =
+    typeof issue.location === "string"
+      ? issue.location
+      : (issue as { locationText?: string }).locationText ||
+        (issue.coordinates ? `${issue.coordinates.lat.toFixed(4)}, ${issue.coordinates.lng.toFixed(4)}` : "");
+  const locationHtml = locationRaw
+    ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;">📍 ${locationRaw}</div>`
     : "";
 
   return `
@@ -92,8 +96,8 @@ function buildPopup(issue: AnyIssue): string {
         ${issue.description}
       </p>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-        <span style="display:inline-flex;align-items:center;gap:4px;background:${color}22;color:${color};border:1px solid ${color}44;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;">
-          <span style="width:6px;height:6px;background:${color};border-radius:50%;display:inline-block;"></span>
+        <span style="display:inline-flex;align-items:center;gap:4px;background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;">
+          <span style="width:6px;height:6px;background:${statusColor};border-radius:50%;display:inline-block;"></span>
           ${statusLabel}
         </span>
         ${severityBadge}
@@ -168,7 +172,7 @@ export function IssueMap({
       const issuesWithCoords = issues.filter((i) => i.coordinates);
       for (const issue of issuesWithCoords) {
         const { lat, lng } = issue.coordinates!;
-        const color = MARKER_COLORS[issue.status] ?? "#6b7280";
+        const color = getSeverityMarkerColor((issue as { severity?: string }).severity, (issue as AdminIssue).severityScore);
         const icon = makeMarkerIcon(L, color);
         const marker = L.marker([lat, lng], { icon })
           .addTo(map)
@@ -212,7 +216,7 @@ export function IssueMap({
       const issuesWithCoords = issues.filter((i) => i.coordinates);
       for (const issue of issuesWithCoords) {
         const { lat, lng } = issue.coordinates!;
-        const color = MARKER_COLORS[issue.status] ?? "#6b7280";
+        const color = getSeverityMarkerColor((issue as { severity?: string }).severity, (issue as AdminIssue).severityScore);
         const icon = makeMarkerIcon(L, color);
         const marker = L.marker([lat, lng], { icon })
           .addTo(mapRef.current!)

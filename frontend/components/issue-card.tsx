@@ -4,9 +4,10 @@ import { useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { formatDistanceToNow } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { MapPin, Tag, ChevronUp, Loader2, MessageSquare, User, ShieldCheck, ShieldAlert } from "lucide-react";
+import { MapPin, ChevronUp, Loader2, MessageSquare, User, ShieldCheck, ShieldAlert } from "lucide-react";
 import { CommentsSection } from "@/components/comments-section";
 import { ImageLightbox, ExpandHint } from "@/components/image-lightbox";
+import { isHighSeverity, resolveSeverity } from "@/lib/severity";
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5500").replace(/\/$/, "");
 
@@ -14,8 +15,14 @@ export interface Issue {
   _id: string;
   title: string;
   description: string;
-  location?: string;
+  location?: string | { lat: number; lng: number };
+  locationText?: string;
   imageUrl?: string;
+  category?: string;
+  severity?: string;
+  severityScore?: number;
+  confidence?: number;
+  department?: string;
   status: "reported" | "approved" | "in_progress" | "resolved";
   upvotes: string[];
   reportedBy?: string;
@@ -110,9 +117,23 @@ export function IssueCard({ issue }: { issue: Issue }) {
   }
 
   const reporterName = issue.reporterName || "Anonymous";
+  const severityLevel = resolveSeverity(issue.severity, issue.severityScore);
+  const shouldHighlight = isHighSeverity(issue.severity, issue.severityScore);
+  const locationLabel =
+    typeof issue.location === "string"
+      ? issue.location
+      : issue.locationText ||
+        (issue.location?.lat != null && issue.location?.lng != null
+          ? `${issue.location.lat.toFixed(4)}, ${issue.location.lng.toFixed(4)}`
+          : undefined);
 
   return (
-    <article className="group rounded-xl border border-border/60 bg-background shadow-sm transition-shadow hover:shadow-md">
+    <article
+      className={cn(
+        "group rounded-xl border border-border/60 bg-background shadow-sm transition-shadow hover:shadow-md",
+        shouldHighlight && "border-red-200 bg-red-50/30 dark:border-red-900/40 dark:bg-red-950/20"
+      )}
+    >
       <div className="p-5">
         {/* Reporter row */}
         <div className="flex items-center gap-2 mb-3">
@@ -159,6 +180,18 @@ export function IssueCard({ issue }: { issue: Issue }) {
                 Verified Resolution ✅
               </span>
             )}
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-xs font-medium",
+                severityLevel === "Critical" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                severityLevel === "High" && "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+                severityLevel !== "Critical" &&
+                  severityLevel !== "High" &&
+                  "bg-muted text-muted-foreground"
+              )}
+            >
+              Severity: {severityLevel}
+            </span>
           </div>
         </div>
 
@@ -262,10 +295,10 @@ export function IssueCard({ issue }: { issue: Issue }) {
 
         {/* Meta row */}
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-          {issue.location && (
+          {locationLabel && (
             <span className="flex items-center gap-1">
               <MapPin className="h-3 w-3" />
-              {issue.location}
+              {locationLabel}
             </span>
           )}
 
@@ -341,8 +374,14 @@ export interface Issue {
   _id: string;
   title: string;
   description: string;
-  location?: string;
+  location?: string | { lat: number; lng: number };
+  locationText?: string;
   imageUrl?: string;
+  category?: string;
+  severity?: string;
+  severityScore?: number;
+  confidence?: number;
+  department?: string;
   status: "reported" | "approved" | "in_progress" | "resolved";
   upvotes: string[];
   reportedBy?: string;

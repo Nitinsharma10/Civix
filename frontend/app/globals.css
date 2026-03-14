@@ -123,3 +123,19 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  @keyframes processing-fade {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .animate-processing-fade {
+    animation: processing-fade 2s ease-in-out infinite;
+  }
+}
