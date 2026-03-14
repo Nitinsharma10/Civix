@@ -27,10 +27,10 @@ const createIssueLimiter = rateLimit({
   skip: (req) => process.env.NODE_ENV === 'development' && req.ip === '::1',
 });
 
-// Rate limit for comments/upvotes - 50 per 15 minutes
+// Rate limit for comments/upvotes - 100 per 15 minutes
 const interactionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50,
+  max: 100,
   message: {
     success: false,
     message: 'Too many interactions. Please slow down.'

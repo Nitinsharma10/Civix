@@ -125,23 +125,35 @@ function DonutChart({
   const r = (size - strokeWidth) / 2;
   const circ = 2 * Math.PI * r;
 
-  let offset = 0;
-  const segments = data.map((d, i) => {
+  const segments = data.reduce<
+    {
+      color: string;
+      dash: number;
+      gap: number;
+      offset: number;
+      label: string;
+      value: number;
+      pct: number;
+    }[]
+  >((acc, d, i) => {
+    const currentOffset =
+      acc.length > 0 ? acc[acc.length - 1].offset + acc[acc.length - 1].dash : 0;
     const pct = total ? d.value / total : 0;
     const dash = pct * circ;
     const gap = circ - dash;
-    const seg = {
+
+    acc.push({
       color: PIE_COLORS[i % PIE_COLORS.length],
       dash,
       gap,
-      offset,
+      offset: currentOffset,
       label: d.label,
       value: d.value,
       pct: pct * 100,
-    };
-    offset += dash;
-    return seg;
-  });
+    });
+
+    return acc;
+  }, []);
 
   return (
     <div className="rounded-2xl border border-border bg-background p-5 shadow-sm">

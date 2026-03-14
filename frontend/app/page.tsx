@@ -1,11 +1,8 @@
 import Image from "next/image";
 import {
-  MapPin,
   ClipboardCheck,
   Bell,
   BarChart3,
-  Users,
-  Zap,
 } from "lucide-react";
 import { SignedIn, SignedOut } from "@clerk/nextjs";
 import { Navbar } from "@/components/navbar";
