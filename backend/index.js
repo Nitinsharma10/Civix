@@ -25,15 +25,18 @@ app.use(express.urlencoded({ extended: true }));
 // Rate Limiting - General API protection
 // ──────────────────────────────────────────────────────────────────────────────
 const generalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 requests per minute
+  windowMs: Number(process.env.GENERAL_RATE_WINDOW_MS || 60_000),
+  max:
+    process.env.NODE_ENV === 'production'
+      ? Number(process.env.GENERAL_RATE_MAX || 10)
+      : Number(process.env.GENERAL_RATE_MAX_DEV || 100000),
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => process.env.NODE_ENV === 'development' && req.ip === '::1',
+  skip: () => process.env.NODE_ENV !== 'production',
 });
 
 // Apply general rate limiter to all API routes
