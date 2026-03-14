@@ -52,6 +52,15 @@ function severityToScore(severity: string): number | null {
   if (severity === "Low") return 2;
   return null;
 }
+const impactScopeOptions = ["Individual", "Locality", "Ward", "City-wide"];
+const urgencyOptions = ["Immediate", "Within 24hrs", "Within a Week", "Routine"];
+const estimatedResolutionOptions = [
+  "Same Day",
+  "1-3 Days",
+  "1 Week",
+  "2-4 Weeks",
+  "Long-term Project",
+];
 
 interface FormState {
   title: string;
@@ -70,7 +79,12 @@ interface AIFields {
   predictedIssueType: string;
   severity: string;
   confidence: number | string;
+  severityScore: number | string;
+  impactScope: string;
+  urgency: string;
+  priorityScore: number | string;
   suggestedDepartment: string;
+  estimatedResolution: string;
   description: string;
 }
 
@@ -246,7 +260,18 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
 
       // Even if the call failed, fall back gracefully to review with original fields
       const responseData = res.ok ? data.data : null;
-      const aiDataPresent = responseData?.predictedIssueType;
+      const aiDataPresent = Boolean(
+        responseData && (
+          responseData.predictedIssueType ||
+          responseData.severityScore != null ||
+          responseData.impactScope ||
+          responseData.urgency ||
+          responseData.priorityScore != null ||
+          responseData.suggestedDepartment ||
+          responseData.estimatedResolution ||
+          responseData.description
+        )
+      );
 
       if (!res.ok || !aiDataPresent) {
         setWebhookFailed(true);
@@ -264,12 +289,40 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
       }
 
       setAiFields({
-        imageUrl: responseData?.imageUrl ?? null,
-        predictedIssueType: responseData?.issueType ?? responseData?.predictedIssueType ?? "",
-        severity: responseData?.severity ?? severityFromScore(responseData?.severityScore),
-        confidence: responseData?.confidence ?? "",
-        suggestedDepartment: responseData?.department ?? responseData?.suggestedDepartment ?? "",
-        description: responseData?.description ?? form.description.trim(),
+  imageUrl: responseData?.imageUrl ?? null,
+
+  // Issue classification
+  predictedIssueType:
+    responseData?.issueType ??
+    responseData?.predictedIssueType ??
+    "",
+
+  // Severity
+  severity:
+    responseData?.severity ??
+    severityFromScore(responseData?.severityScore),
+
+  severityScore: responseData?.severityScore ?? "",
+
+  // Confidence
+  confidence: responseData?.confidence ?? "",
+
+  // Department routing
+  suggestedDepartment:
+    responseData?.department ??
+    responseData?.suggestedDepartment ??
+    "",
+
+  // Impact metrics
+  impactScope: responseData?.impactScope ?? "",
+  urgency: responseData?.urgency ?? "",
+  priorityScore: responseData?.priorityScore ?? "",
+
+  // Resolution estimate
+  estimatedResolution: responseData?.estimatedResolution ?? "",
+
+  // Description
+  description: responseData?.description ?? form.description.trim(),
       });
       setStage("review");
     } catch (err: unknown) {
@@ -286,7 +339,12 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
         predictedIssueType: "",
         severity: "",
         confidence: "",
+        severityScore: "",
+        impactScope: "",
+        urgency: "",
+        priorityScore: "",
         suggestedDepartment: "",
+        estimatedResolution: "",
         description: form.description.trim(),
       });
       setStage("review");
@@ -339,17 +397,45 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
       const gps = gpsCoordsRef.current;
 
       const payload: Record<string, unknown> = {
-        title: form.title.trim(),
-        description: aiFields.description,
-        location: form.location.trim() || null,
-        imageUrl: aiFields.imageUrl,
-        predictedIssueType: aiFields.predictedIssueType || null,
-        severity: aiFields.severity || null,
-        confidence: aiFields.confidence !== "" ? Number(aiFields.confidence) : null,
-        severityScore: severityToScore(aiFields.severity),
-        suggestedDepartment: aiFields.suggestedDepartment || null,
-        lat: gps?.lat ?? null,
-        lng: gps?.lng ?? null,
+  title: form.title.trim(),
+  description: aiFields.description,
+
+  location: form.location.trim() || null,
+  imageUrl: aiFields.imageUrl || null,
+
+  // Issue classification
+  predictedIssueType: aiFields.predictedIssueType || null,
+
+  // Severity
+  severity: aiFields.severity || null,
+  severityScore:
+    aiFields.severityScore !== ""
+      ? Number(aiFields.severityScore)
+      : severityToScore(aiFields.severity),
+
+  // Confidence
+  confidence:
+    aiFields.confidence !== ""
+      ? Number(aiFields.confidence)
+      : null,
+
+  // Impact metrics
+  impactScope: aiFields.impactScope || null,
+  urgency: aiFields.urgency || null,
+  priorityScore:
+    aiFields.priorityScore !== ""
+      ? Number(aiFields.priorityScore)
+      : null,
+
+  // Department routing
+  suggestedDepartment: aiFields.suggestedDepartment || null,
+
+  // Resolution estimate
+  estimatedResolution: aiFields.estimatedResolution || null,
+
+  // GPS coordinates
+  lat: gps?.lat ?? null,
+  lng: gps?.lng ?? null,
       };
 
       const res = await fetch(`${BACKEND_URL}/api/issues`, {
@@ -512,7 +598,7 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
             />
           </div>
 
-          {/* Severity + Department */}
+          {/* Severity + Priority */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1">
               <label htmlFor="ai-severity" className="text-sm font-medium flex items-center gap-1.5">
@@ -539,6 +625,67 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
             </div>
 
             <div className="space-y-1">
+              <label htmlFor="ai-priorityScore" className="text-sm font-medium flex items-center gap-1.5">
+                Priority Score <span className="text-muted-foreground font-normal">(1–100)</span>
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI</span>
+              </label>
+              <input
+                id="ai-priorityScore"
+                name="priorityScore"
+                type="number"
+                min={1}
+                max={100}
+                value={aiFields.priorityScore}
+                onChange={handleAiFieldChange}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+          </div>
+
+          {/* Impact + Urgency */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label htmlFor="ai-impactScope" className="text-sm font-medium flex items-center gap-1.5">
+                Impact Scope
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI</span>
+              </label>
+              <select
+                id="ai-impactScope"
+                name="impactScope"
+                value={aiFields.impactScope}
+                onChange={handleAiFieldChange}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Select impact scope…</option>
+                {impactScopeOptions.map((scope) => (
+                  <option key={scope} value={scope}>{scope}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="ai-urgency" className="text-sm font-medium flex items-center gap-1.5">
+                Urgency
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI</span>
+              </label>
+              <select
+                id="ai-urgency"
+                name="urgency"
+                value={aiFields.urgency}
+                onChange={handleAiFieldChange}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Select urgency…</option>
+                {urgencyOptions.map((urgency) => (
+                  <option key={urgency} value={urgency}>{urgency}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Department + Estimated Resolution */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
               <label htmlFor="ai-suggestedDepartment" className="text-sm font-medium flex items-center gap-1.5">
                 Department
                 <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI</span>
@@ -553,6 +700,25 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
                 <option value="">Select department…</option>
                 {suggestedDepartments.map((d) => (
                   <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="ai-estimatedResolution" className="text-sm font-medium flex items-center gap-1.5">
+                Estimated Resolution
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">AI</span>
+              </label>
+              <select
+                id="ai-estimatedResolution"
+                name="estimatedResolution"
+                value={aiFields.estimatedResolution}
+                onChange={handleAiFieldChange}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Select estimated resolution…</option>
+                {estimatedResolutionOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
                 ))}
               </select>
             </div>

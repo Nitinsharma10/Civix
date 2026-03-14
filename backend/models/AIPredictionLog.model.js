@@ -19,8 +19,48 @@ const aiPredictionLogSchema = new mongoose.Schema(
     },
     severityScore: {
       type: Number,
-      min: 0,
+      min: 1,
       max: 10,
+    },
+    impactScope: {
+      type: String,
+      enum: ["Individual", "Locality", "Ward", "City-wide"],
+    },
+    urgency: {
+      type: String,
+      enum: ["Immediate", "Within 24hrs", "Within a Week", "Routine"],
+    },
+    priorityScore: {
+      type: Number,
+      min: 1,
+      max: 100,
+    },
+    suggestedDepartment: {
+      type: String,
+      enum: [
+        "Electrical",
+        "Plumbing",
+        "Civil",
+        "Housekeeping",
+        "Lift",
+        "Security",
+        "Other",
+      ],
+      trim: true,
+    },
+    estimatedResolution: {
+      type: String,
+      enum: [
+        "Same Day",
+        "1-3 Days",
+        "1 Week",
+        "2-4 Weeks",
+        "Long-term Project",
+      ],
+    },
+    description: {
+      type: String,
+      trim: true,
     },
     confidenceScore: {
       type: Number,
@@ -39,6 +79,13 @@ aiPredictionLogSchema.pre("save", function (next) {
   ) {
     throw new Error("Confidence score must be between 0 and 1");
   }
+
+  for (const fieldName of ["severityScore", "priorityScore"]) {
+    if (this[fieldName] != null && !Number.isInteger(this[fieldName])) {
+      throw new Error(`${fieldName} must be an integer`);
+    }
+  }
+
   next();
 });
 

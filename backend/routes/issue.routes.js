@@ -93,6 +93,15 @@ async function callN8nWebhook(title, description, imageUrl) {
   return normalizeN8nAnalysis(parsed, description);
 }
 
+function parseIntegerOrNull(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 // ---------- POST /api/issues/preview  ----------
 // Step 1: Upload image to Cloudinary, call n8n webhook, return AI-enriched fields.
 // The issue is NOT saved to the DB here.
@@ -175,26 +184,50 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
       : (mlSeverityAccepted ? 'n8n_with_ml_severity_override' : 'n8n');
 
     const responseData = {
-      imageUrl,
-      description: finalAnalysis?.description || description,
-      issueType: finalAnalysis?.issue || null,
-      category: finalAnalysis?.issue || null,
-      severity: finalAnalysis?.severity || 'None',
-      confidence: finalAnalysis?.confidence,
-      department: finalAnalysis?.department || null,
-      source,
-      mlOk,
-      mlError,
-      mlSeverityAccepted: Boolean(mlSeverityAccepted),
-      mlSeverity: mlResult?.severity || null,
-      mlConfidence: mlResult?.confidence ?? null,
-      mlDescription: mlResult?.description || null,
-      webhookOk,
-      webhookError,
-      predictedIssueType: finalAnalysis?.issue || null,
-      severityScore: finalAnalysis?.severityScore ?? null,
-      suggestedDepartment: finalAnalysis?.department || null,
-    };
+  imageUrl,
+
+  // Description priority: AI → ML → original
+  description: aiFields.description || mlResult?.description || description,
+
+  // Issue classification
+  issueType: finalAnalysis?.issue || null,
+  category: aiFields.category || finalAnalysis?.issue || null,
+  predictedIssueType: finalAnalysis?.issue || aiFields.predictedIssueType || null,
+
+  // Severity
+  severity: finalAnalysis?.severity || 'None',
+  severityScore: finalAnalysis?.severityScore ?? parseIntegerOrNull(aiFields.severityScore),
+
+  // Impact metrics
+  impactScope: aiFields.impactScope || null,
+  urgency: aiFields.urgency || null,
+  priorityScore: parseIntegerOrNull(aiFields.priorityScore),
+
+  // Department routing
+  department: finalAnalysis?.department || null,
+  suggestedDepartment: finalAnalysis?.department || aiFields.suggestedDepartment || null,
+
+  // ML outputs
+  mlOk,
+  mlError,
+  mlSeverityAccepted: Boolean(mlSeverityAccepted),
+  mlSeverity: mlResult?.severity || null,
+  mlConfidence: mlResult?.confidence ?? null,
+  mlDescription: mlResult?.description || null,
+
+  // AI metadata
+  confidence: finalAnalysis?.confidence,
+
+  // Resolution estimate
+  estimatedResolution: aiFields.estimatedResolution || null,
+
+  // Source tracking
+  source,
+
+  // Webhook status
+  webhookOk,
+  webhookError
+};
     console.log('[PREVIEW] Sending enriched fields to client:', JSON.stringify(responseData));
     console.log('[PREVIEW] ── Done. Awaiting user confirmation. ──\n');
 
@@ -228,7 +261,11 @@ router.post('/', createIssueLimiter, requireAuth(), async (req, res) => {
       imageUrl,
       predictedIssueType,
       severityScore,
+      impactScope,
+      urgency,
+      priorityScore,
       suggestedDepartment,
+      estimatedResolution,
     } = req.body;
 
     console.log('\n[CREATE] ── User confirmed issue, saving to DB ──');
@@ -237,6 +274,7 @@ router.post('/', createIssueLimiter, requireAuth(), async (req, res) => {
     console.log('[CREATE] Description:', description);
     console.log('[CREATE] Category:', category || issueType, '| Dept:', department || suggestedDepartment, '| Severity:', severity || severityFromScore(severityScore));
     console.log('[CREATE] Predicted type:', predictedIssueType);
+    console.log('[CREATE] Impact:', impactScope, '| Urgency:', urgency, '| Priority:', priorityScore, '| ETA:', estimatedResolution);
     console.log('[CREATE] Image URL:', imageUrl || 'none');
     console.log('[CREATE] GPS:', lat && lng ? `${lat}, ${lng}` : 'not provided');
 
@@ -270,26 +308,48 @@ router.post('/', createIssueLimiter, requireAuth(), async (req, res) => {
     const normalizedCategory = category || issueType || predictedIssueType || null;
     const normalizedDepartment = department || suggestedDepartment || null;
 
-    const issue = {
-      title,
-      description,
-      location: normalizedLocation,
-      locationText: typeof location === 'string' && !location.startsWith('{') ? location : null,
-      category: normalizedCategory,
-      severity: normalizedSeverity,
-      confidence: normalizedConfidence,
-      department: normalizedDepartment,
-      imageUrl: imageUrl || null,
-      predictedIssueType: normalizedCategory,
-      severityScore: scoreFromSeverity(normalizedSeverity),
-      suggestedDepartment: normalizedDepartment,
-      coordinates: normalizedLocation,
-      reportedBy: clerkUserId,
-      status: 'reported',
-      upvotes: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+const issue = {
+  title,
+  description,
+
+  // Location
+  location: normalizedLocation,
+  locationText: typeof location === 'string' && !location.startsWith('{') ? location : null,
+  coordinates: coordinates || normalizedLocation,
+
+  // Classification
+  category: normalizedCategory,
+  predictedIssueType: predictedIssueType || normalizedCategory,
+
+  // Severity
+  severity: normalizedSeverity,
+  severityScore: parseIntegerOrNull(severityScore) ?? scoreFromSeverity(normalizedSeverity),
+
+  // AI metrics
+  impactScope: impactScope || null,
+  urgency: urgency || null,
+  priorityScore: parseIntegerOrNull(priorityScore),
+
+  // Department routing
+  department: normalizedDepartment,
+  suggestedDepartment: suggestedDepartment || normalizedDepartment,
+
+  // Confidence
+  confidence: normalizedConfidence,
+
+  // Resolution estimate
+  estimatedResolution: estimatedResolution || null,
+
+  // Media
+  imageUrl: imageUrl || null,
+
+  // Metadata
+  reportedBy: clerkUserId,
+  status: 'reported',
+  upvotes: [],
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
 
     console.log('[CREATE] Inserting into MongoDB…');
     const inserted = await db.collection('issues').insertOne(issue);
@@ -709,14 +769,16 @@ router.patch('/:id', requireAuth(), async (req, res) => {
 
     const issueId = new ObjectId(req.params.id);
     const allowedFields = [
-      'status', 'severity', 'confidence', 'department', 'severityScore', 'suggestedDepartment',
+      'status', 'severityScore', 'impactScope', 'urgency', 'priorityScore', 'suggestedDepartment', 'estimatedResolution',
       'title', 'description', 'location', 'predictedIssueType',
     ];
 
     const updates = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
+        updates[field] = ['severityScore', 'priorityScore'].includes(field)
+          ? parseIntegerOrNull(req.body[field])
+          : req.body[field];
       }
     }
 

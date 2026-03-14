@@ -54,12 +54,44 @@ const issueSchema = new mongoose.Schema(
     },
     severityScore: {
       type: Number,
-      min: 0,
+      min: 1,
       max: 10,
+    },
+    impactScope: {
+      type: String,
+      enum: ["Individual", "Locality", "Ward", "City-wide"],
+    },
+    urgency: {
+      type: String,
+      enum: ["Immediate", "Within 24hrs", "Within a Week", "Routine"],
+    },
+    priorityScore: {
+      type: Number,
+      min: 1,
+      max: 100,
     },
     suggestedDepartment: {
       type: String,
+      enum: [
+        "Electrical",
+        "Plumbing",
+        "Civil",
+        "Housekeeping",
+        "Lift",
+        "Security",
+        "Other",
+      ],
       trim: true,
+    },
+    estimatedResolution: {
+      type: String,
+      enum: [
+        "Same Day",
+        "1-3 Days",
+        "1 Week",
+        "2-4 Weeks",
+        "Long-term Project",
+      ],
     },
     upvotes: [
       {
@@ -85,16 +117,10 @@ issueSchema.virtual("upvoteCount").get(function () {
   return this.upvotes ? this.upvotes.length : 0;
 });
 
-// Virtual: priorityScore = severityScore + (upvotes.length * 0.5)
-issueSchema.virtual("priorityScore").get(function () {
-  const severity = this.severityScore || 0;
-  const upvoteBonus = this.upvotes ? this.upvotes.length * 0.5 : 0;
-  return severity + upvoteBonus;
-});
-
 // Indexes
 issueSchema.index({ status: 1 });
 issueSchema.index({ severityScore: -1 });
+issueSchema.index({ priorityScore: -1 });
 issueSchema.index({ createdAt: -1 });
 
 // Pre-save: if status is set to "resolved", ensure severityScore exists
@@ -104,6 +130,13 @@ issueSchema.pre("save", function (next) {
       "Cannot resolve an issue without a severity score"
     );
   }
+
+  for (const fieldName of ["severityScore", "priorityScore"]) {
+    if (this[fieldName] != null && !Number.isInteger(this[fieldName])) {
+      throw new Error(`${fieldName} must be an integer`);
+    }
+  }
+
   next();
 });
 
