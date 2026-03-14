@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutList, Map, BarChart3, ShieldCheck, X, Menu } from "lucide-react";
+import { LayoutList, Map, BarChart3, X, Menu } from "lucide-react";
 import { useState } from "react";
 
 const NAV_ITEMS = [
@@ -12,33 +12,31 @@ const NAV_ITEMS = [
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
-export function AdminSidebar() {
-  const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  const NavContent = () => (
+function SidebarNavContent({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate: () => void;
+}) {
+  return (
     <>
       {/* Logo */}
       <div className="flex h-16 items-center gap-2.5 px-5 border-b border-sidebar-border shrink-0">
-        {/* <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sidebar-primary">
-          <ShieldCheck className="h-4 w-4 text-sidebar-primary-foreground" />
-        </div> */}
         <span className="font-bold text-sidebar-foreground text-base tracking-tight">
           <span className="text-2xl font-extrabold">Civix. </span> Admin
         </span>
-        
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const active =
-            pathname === href || pathname.startsWith(href + "/");
+          const active = pathname === href || pathname.startsWith(href + "/");
           return (
             <Link
               key={href}
               href={href}
-              onClick={() => setMobileOpen(false)}
+              onClick={onNavigate}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
                 active
@@ -61,12 +59,20 @@ export function AdminSidebar() {
       </div>
     </>
   );
+}
+
+export function AdminSidebar() {
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <>
       {/* ── Desktop Sidebar ── */}
       <aside className="hidden md:flex fixed inset-y-0 left-0 z-40 w-60 flex-col bg-sidebar border-r border-sidebar-border">
-        <NavContent />
+        <SidebarNavContent
+          pathname={pathname}
+          onNavigate={() => setMobileOpen(false)}
+        />
       </aside>
 
       {/* ── Mobile: hamburger button (shown in header) ── */}
@@ -100,7 +106,10 @@ export function AdminSidebar() {
         >
           <X className="h-4 w-4" />
         </button>
-        <NavContent />
+        <SidebarNavContent
+          pathname={pathname}
+          onNavigate={() => setMobileOpen(false)}
+        />
       </aside>
     </>
   );

@@ -2,7 +2,7 @@
 
 import "leaflet/dist/leaflet.css";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { MapPin, Navigation, Loader2, CheckCircle2, AlertTriangle, X, Map } from "lucide-react";
+import { Navigation, Loader2, CheckCircle2, AlertTriangle, X, Map } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface PickedLocation {
@@ -174,6 +174,16 @@ function MapTab({ value, onChange }: LocationPickerProps) {
   const [geoError, setGeoError] = useState<string | null>(null);
 
   // ── helpers (defined before useEffect so they can be referenced) ──────
+  const doUpdateLocation = useCallback(
+    async (lat: number, lng: number) => {
+      setGeocoding(true);
+      const address = await reverseGeocode(lat, lng);
+      setGeocoding(false);
+      onChange({ lat, lng, address });
+    },
+    [onChange]
+  );
+
   const bindDrag = useCallback(
     (L: typeof import("leaflet"), marker: import("leaflet").Marker) => {
       marker.on("dragend", async () => {
@@ -181,8 +191,7 @@ function MapTab({ value, onChange }: LocationPickerProps) {
         await doUpdateLocation(pos.lat, pos.lng);
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [doUpdateLocation]
   );
 
   const doPlaceMarker = useCallback(
@@ -200,15 +209,8 @@ function MapTab({ value, onChange }: LocationPickerProps) {
       }
       await doUpdateLocation(lat, lng);
     },
-    [bindDrag]
+    [bindDrag, doUpdateLocation]
   );
-
-  async function doUpdateLocation(lat: number, lng: number) {
-    setGeocoding(true);
-    const address = await reverseGeocode(lat, lng);
-    setGeocoding(false);
-    onChange({ lat, lng, address });
-  }
 
   function clearMarker() {
     markerRef.current?.remove();

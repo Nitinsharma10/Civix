@@ -316,7 +316,7 @@ export function AdminIssueMap({
     hasFittedRef.current = true;
 
     (async () => {
-      const L = (await import("leaflet")).default;
+      await import("leaflet");
       const points: [number, number][] = withCoords.map((i) => [
         i.coordinates!.lat,
         i.coordinates!.lng,
@@ -359,11 +359,16 @@ export function AdminIssueMap({
 
   // ── Cleanup on unmount ──
   useEffect(() => {
+    const markerMap = markerMapRef.current;
+    const map = mapRef.current;
+
     return () => {
-      markerMapRef.current.forEach((m) => m.remove());
-      markerMapRef.current.clear();
-      mapRef.current?.remove();
-      mapRef.current = null;
+      markerMap.forEach((m) => m.remove());
+      markerMap.clear();
+      map?.remove();
+      if (mapRef.current === map) {
+        mapRef.current = null;
+      }
     };
   }, []);
 

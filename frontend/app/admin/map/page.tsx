@@ -49,8 +49,6 @@ const ALL_DEPARTMENTS = [
   "Other",
 ] as const;
 
-type Department = (typeof ALL_DEPARTMENTS)[number];
-
 const STATUS_OPTIONS = [
   { value: "reported", label: "Reported" },
   { value: "approved", label: "Approved" },
