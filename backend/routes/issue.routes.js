@@ -48,12 +48,33 @@ function normalizeN8nAnalysis(payload, fallbackDescription) {
   const department = payload?.department || payload?.suggestedDepartment || null;
   const description = payload?.description || fallbackDescription;
   const severityScoreFromPayload = Number(payload?.severityScore);
+  const impactScope =
+    payload?.impactScope ||
+    payload?.impact_scope ||
+    payload?.impact ||
+    null;
+  const urgency = payload?.urgency || null;
+  const priorityScore =
+    parseIntegerOrNull(payload?.priorityScore) ??
+    parseIntegerOrNull(payload?.priority_score) ??
+    parseIntegerOrNull(payload?.priority) ??
+    null;
+  const estimatedResolution =
+    payload?.estimatedResolution ||
+    payload?.estimated_resolution ||
+    payload?.resolutionEta ||
+    payload?.resolution_eta ||
+    null;
   return {
     description,
     issue,
     severity,
     confidence,
     department,
+    impactScope,
+    urgency,
+    priorityScore,
+    estimatedResolution,
     severityScore: Number.isFinite(severityScoreFromPayload) ? severityScoreFromPayload : scoreFromSeverity(severity),
   };
 }
@@ -198,10 +219,10 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
       severity: finalAnalysis?.severity || 'None',
       severityScore: finalAnalysis?.severityScore ?? null,
 
-      // Impact metrics (not currently produced by normalization)
-      impactScope: null,
-      urgency: null,
-      priorityScore: null,
+      // Impact metrics
+      impactScope: finalAnalysis?.impactScope || null,
+      urgency: finalAnalysis?.urgency || null,
+      priorityScore: finalAnalysis?.priorityScore ?? null,
 
       // Department routing
       department: finalAnalysis?.department || null,
@@ -218,8 +239,8 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
       // AI metadata
       confidence: finalAnalysis?.confidence,
 
-      // Resolution estimate (not currently produced by normalization)
-      estimatedResolution: null,
+      // Resolution estimate
+      estimatedResolution: finalAnalysis?.estimatedResolution || null,
 
       // Source tracking
       source,
@@ -315,7 +336,7 @@ const issue = {
   // Location
   location: normalizedLocation,
   locationText: typeof location === 'string' && !location.startsWith('{') ? location : null,
-  coordinates: coordinates || normalizedLocation,
+  coordinates: normalizedLocation,
 
   // Classification
   category: normalizedCategory,
