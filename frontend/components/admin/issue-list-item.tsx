@@ -1,12 +1,15 @@
 "use client";
 
-import { CheckCircle2, Clock3, Pencil } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, Clock3, ImageIcon, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "@/lib/time";
+import { ImagePreviewModal } from "@/components/admin/image-preview-modal";
 
 interface IssueListItemProps {
   title: string;
   description: string;
+  imageUrl: string;
   category: string;
   department: string;
   severityScore: number;
@@ -19,6 +22,7 @@ interface IssueListItemProps {
 export function IssueListItem({
   title,
   description,
+  imageUrl,
   category,
   department,
   severityScore,
@@ -27,53 +31,91 @@ export function IssueListItem({
   onResolve,
   canResolve = false,
 }: IssueListItemProps) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const isHighPriority = severityScore > 8.5;
 
   return (
-    <div
-      className={cn(
-        "rounded-xl transition-all duration-200",
-        isHighPriority
-          ? "bg-gradient-to-r from-red-900 via-red-700 to-red-500 p-[1.5px]"
-          : ""
-      )}
-    >
-      <article
+    <>
+      <div
         className={cn(
-          "rounded-[11px] border bg-background px-4 py-3 shadow-sm transition-colors duration-200 hover:bg-muted/25",
+          "rounded-2xl transition-all duration-300",
           isHighPriority
-            ? "border-transparent"
-            : "border-border"
+            ? "bg-gradient-to-r from-red-950 via-red-800 to-red-600 p-[2px]"
+            : ""
         )}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground line-clamp-1">{title}</h3>
-            <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{description}</p>
+        <article
+          className={cn(
+            "group rounded-[14px] border bg-background p-4 shadow-sm transition-all duration-300",
+            "hover:bg-slate-800/90 hover:scale-[1.01]",
+            isHighPriority
+              ? "border-transparent hover:bg-red-950/75"
+              : "border-border"
+          )}
+        >
+          <div className="flex items-start gap-4">
+            <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-border/70 bg-muted">
+              {imageUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(true)}
+                  className="block h-full w-full cursor-zoom-in"
+                  aria-label={`Preview image for ${title}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl} alt={title} className="h-full w-full object-cover" />
+                </button>
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <ImageIcon className="h-6 w-6 text-muted-foreground/50 transition-colors duration-200 group-hover:text-white/80" />
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="line-clamp-1 text-base font-semibold text-foreground transition-colors duration-200 group-hover:text-white">
+                  {title}
+                </h3>
+
+                {isHighPriority && (
+                  <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 transition-colors duration-200 group-hover:bg-white/15 group-hover:text-white dark:bg-red-900/35 dark:text-red-300">
+                    High Priority
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-1 line-clamp-2 text-sm text-muted-foreground transition-colors duration-200 group-hover:text-white/90">
+                {description}
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground transition-colors duration-200 group-hover:text-white/85">
+                <span className="max-w-full truncate">Category: {category}</span>
+                <span className="text-border transition-colors duration-200 group-hover:text-white/60">
+                  |
+                </span>
+                <span className="max-w-full truncate">Department: {department}</span>
+                <span className="text-border transition-colors duration-200 group-hover:text-white/60">
+                  |
+                </span>
+                <span>Severity: {Number.isFinite(severityScore) ? severityScore.toFixed(1) : "—"}</span>
+                <span className="text-border transition-colors duration-200 group-hover:text-white/60">
+                  |
+                </span>
+                <span className="flex items-center gap-1">
+                  <Clock3 className="h-3.5 w-3.5 transition-colors duration-200 group-hover:text-white/85" />
+                  {formatDistanceToNow(createdAt)}
+                </span>
+              </div>
+            </div>
           </div>
 
-          {isHighPriority && (
-            <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/35 dark:text-red-300">
-              High Priority
-            </span>
-          )}
-        </div>
-
-        <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-5">
-          <span className="truncate"><strong className="text-foreground/80">Category:</strong> {category}</span>
-          <span className="truncate"><strong className="text-foreground/80">Department:</strong> {department}</span>
-          <span><strong className="text-foreground/80">Severity:</strong> {Number.isFinite(severityScore) ? severityScore.toFixed(1) : "—"}</span>
-          <span className="flex items-center gap-1">
-            <Clock3 className="h-3.5 w-3.5" />
-            {formatDistanceToNow(createdAt)}
-          </span>
-
           {(onEdit || (onResolve && canResolve)) && (
-            <div className="flex items-center gap-2 lg:justify-end">
+            <div className="mt-3 flex items-center gap-2">
               {onEdit && (
                 <button
                   onClick={onEdit}
-                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:border-white/60 hover:text-white"
                 >
                   <Pencil className="h-3 w-3" />
                   Edit
@@ -83,7 +125,7 @@ export function IssueListItem({
               {onResolve && canResolve && (
                 <button
                   onClick={onResolve}
-                  className="flex items-center gap-1 rounded-md bg-green-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-green-700 transition-colors"
+                  className="flex items-center gap-1 rounded-md bg-green-600 px-2 py-1 text-[11px] font-medium text-white transition-colors duration-200 hover:bg-green-700"
                 >
                   <CheckCircle2 className="h-3 w-3" />
                   Resolve
@@ -91,8 +133,15 @@ export function IssueListItem({
               )}
             </div>
           )}
-        </div>
-      </article>
-    </div>
+        </article>
+      </div>
+
+      <ImagePreviewModal
+        isOpen={previewOpen}
+        imageUrl={imageUrl}
+        alt={title}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
   );
 }

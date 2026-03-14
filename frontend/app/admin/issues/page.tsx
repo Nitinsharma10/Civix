@@ -298,6 +298,7 @@ export default function AdminIssuesPage() {
                     key={issue._id}
                     title={issue.title}
                     description={issue.description}
+                    imageUrl={issue.imageUrl ?? ""}
                     category={issue.category || issue.predictedIssueType || "Uncategorized"}
                     department={issue.department || issue.suggestedDepartment || "Unassigned"}
                     severityScore={issue.severityScore ?? 0}
