@@ -696,6 +696,8 @@ export function PostIssue({ onSuccess }: PostIssueProps) {
               <p className="text-xs text-amber-700 dark:text-amber-300">
                 {webhookErrorCode === "TIMEOUT"
                   ? "AI analysis timed out. Please review and fill in the fields below before posting."
+                  : webhookErrorCode === "N8N_NOT_CONFIGURED"
+                    ? "AI webhook is not configured yet. You can still submit by reviewing and confirming the fields."
                   : webhookErrorCode === "EMPTY_RESPONSE"
                     ? "AI returned no data. Please review and fill in the fields below."
                     : "AI analysis was unavailable. Please review and fill in the fields below before posting."}

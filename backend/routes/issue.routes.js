@@ -18,10 +18,15 @@ const {
 
 const router = express.Router();
 
-const WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n1.rohithn8n.me/webhook/cad109f9-1c30-404a-be6b-6a6aa8c90b64';
+const WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || '';
 const WEBHOOK_TIMEOUT_MS = 90000; // 90 s — production n8n workflows can take longer than 60 s
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000/analyze-severity';
 const ML_CONFIDENCE_THRESHOLD = Number(process.env.ML_CONFIDENCE_THRESHOLD || 0.8);
+const CLOUDINARY_CONFIGURED = Boolean(
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY &&
+  process.env.CLOUDINARY_API_SECRET
+);
 
 function parseConfidence(value) {
   const numeric = Number(value);
@@ -105,6 +110,12 @@ async function callMlSeverityService(file) {
 }
 
 async function callN8nWebhook(title, description, imageUrl) {
+  if (!WEBHOOK_URL) {
+    const err = new Error('N8N webhook URL is not configured');
+    err.code = 'N8N_NOT_CONFIGURED';
+    throw err;
+  }
+
   const webhookRes = await axios.post(
     WEBHOOK_URL,
     { title, description, image_url: imageUrl },
@@ -186,10 +197,14 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
     // Upload image to Cloudinary if provided
     let imageUrl = null;
     if (req.file) {
-      console.log('[PREVIEW] Uploading image to Cloudinary…');
-      const result = await uploadToCloudinary(req.file.buffer);
-      imageUrl = result.secure_url;
-      console.log('[PREVIEW] ✅ Cloudinary upload successful:', imageUrl);
+      if (CLOUDINARY_CONFIGURED) {
+        console.log('[PREVIEW] Uploading image to Cloudinary…');
+        const result = await uploadToCloudinary(req.file.buffer);
+        imageUrl = result.secure_url;
+        console.log('[PREVIEW] ✅ Cloudinary upload successful:', imageUrl);
+      } else {
+        console.warn('[PREVIEW] ⚠ Cloudinary credentials missing — continuing without image URL.');
+      }
     } else {
       console.log('[PREVIEW] No image — skipping Cloudinary upload.');
     }
@@ -296,7 +311,11 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
       webhookOk = false;
       const status = webhookErr.response?.status;
       const isTimeout = webhookErr.code === 'ECONNABORTED' || webhookErr.message?.includes('timeout');
-      webhookError = isTimeout ? 'TIMEOUT' : (status ? 'HTTP_ERROR' : 'NETWORK_ERROR');
+      if (webhookErr.code === 'N8N_NOT_CONFIGURED') {
+        webhookError = 'N8N_NOT_CONFIGURED';
+      } else {
+        webhookError = isTimeout ? 'TIMEOUT' : (status ? 'HTTP_ERROR' : 'NETWORK_ERROR');
+      }
       console.error('[PREVIEW] ❌ Webhook call failed:', webhookError, webhookErr.message);
     }
 

@@ -85,7 +85,7 @@ app.get('/api/test-db', async (req, res) => {
 
 // Local development: start a real HTTP server
 if (require.main === module) {
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 5500;
   connectDB()
     .then(() => {
       const server = app.listen(PORT, () => {

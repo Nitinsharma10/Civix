@@ -147,6 +147,29 @@ Micro-Task/
 - Clerk keys
 - Cloudinary credentials
 
+### One-Time Setup (Monorepo Root)
+
+```bash
+npm install
+npm run install:all
+```
+
+Create env files:
+
+- `backend/.env` from `backend/.env.example`
+- `frontend/.env` from `frontend/.env.example`
+
+### Run Full Stack Together (Monorepo Root)
+
+```bash
+npm run dev
+```
+
+This starts:
+
+- Backend on `http://localhost:5500`
+- Frontend on `http://localhost:3000`
+
 ### Backend
 
 ```bash
