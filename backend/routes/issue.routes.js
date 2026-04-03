@@ -16,12 +16,13 @@ const {
   sortIssuesBySeverity,
 } = require('../utils/severityRanking');
 
+const { GoogleGenAI } = require('@google/genai');
 const router = express.Router();
 
-const WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || '';
-const WEBHOOK_TIMEOUT_MS = 90000; // 90 s — production n8n workflows can take longer than 60 s
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000/analyze-severity';
-const ML_CONFIDENCE_THRESHOLD = Number(process.env.ML_CONFIDENCE_THRESHOLD || 0.8);
+let ai = null;
+if (process.env.GEMINI_API_KEY) {
+  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+}
 const CLOUDINARY_CONFIGURED = Boolean(
   process.env.CLOUDINARY_CLOUD_NAME &&
   process.env.CLOUDINARY_API_KEY &&
@@ -42,131 +43,56 @@ function normalizeLocation(lat, lng) {
   return { lat: parsedLat, lng: parsedLng };
 }
 
-function normalizeN8nAnalysis(payload, fallbackDescription) {
-  const issue =
-    payload?.issue ||
-    payload?.issueType ||
-    payload?.category ||
-    payload?.predictedIssueType ||
-    null;
-  const severity = normalizeSeverity(payload?.severity || severityFromScore(payload?.severityScore));
-  const confidence = parseConfidence(payload?.confidence) ?? parseConfidence(payload?.confidenceScore);
-  const department = payload?.department || payload?.suggestedDepartment || null;
-  const description = payload?.description || fallbackDescription;
-  const severityScoreFromPayload = Number(payload?.severityScore);
-  const impactScope =
-    payload?.impactScope ||
-    payload?.impact_scope ||
-    payload?.impact ||
-    null;
-  const urgency = payload?.urgency || null;
-  const priorityScore =
-    parseIntegerOrNull(payload?.priorityScore) ??
-    parseIntegerOrNull(payload?.priority_score) ??
-    parseIntegerOrNull(payload?.priority) ??
-    null;
-  const estimatedResolution =
-    payload?.estimatedResolution ||
-    payload?.estimated_resolution ||
-    payload?.resolutionEta ||
-    payload?.resolution_eta ||
-    null;
-  return {
-    description,
-    issue,
-    severity,
-    confidence,
-    department,
-    impactScope,
-    urgency,
-    priorityScore,
-    estimatedResolution,
-    severityScore: Number.isFinite(severityScoreFromPayload) ? severityScoreFromPayload : scoreFromSeverity(severity),
-  };
-}
-
-function normalizeMlSeverity(payload) {
-  const severity = normalizeSeverity(payload?.severity);
-  return {
-    description: payload?.description || null,
-    severity,
-    confidence: parseConfidence(payload?.confidence),
-    severityScore: scoreFromSeverity(severity),
-  };
-}
-
-async function callMlSeverityService(file) {
-  const form = new FormData();
-  form.append('image', file.buffer, {
-    filename: file.originalname || 'issue-image.jpg',
-    contentType: file.mimetype || 'image/jpeg',
-  });
-
-  const mlResponse = await axios.post(ML_SERVICE_URL, form, {
-    headers: form.getHeaders(),
-    timeout: 25000,
-  });
-  return normalizeMlSeverity(mlResponse.data);
-}
-
-async function callN8nWebhook(title, description, imageUrl) {
-  if (!WEBHOOK_URL) {
-    const err = new Error('N8N webhook URL is not configured');
-    err.code = 'N8N_NOT_CONFIGURED';
+async function callGeminiAnalysis(title, description, fileBuffer, mimetype) {
+  if (!ai) {
+    const err = new Error('GEMINI API Key is not configured');
+    err.code = 'GEMINI_NOT_CONFIGURED';
     throw err;
   }
 
-  const webhookRes = await axios.post(
-    WEBHOOK_URL,
-    { title, description, image_url: imageUrl },
-    { headers: { 'Content-Type': 'application/json' }, timeout: WEBHOOK_TIMEOUT_MS }
-  );
-  const raw = webhookRes.data;
-  
-  // Check for invalid/blurry image BEFORE normalization
-  if (Array.isArray(raw) && raw.length > 0) {
-    const firstResult = raw[0] || {};
-    const valueOf = (obj, keys) => {
-      for (const key of keys) {
-        if (obj?.[key] != null) return obj[key];
+  const promptText = `
+You are an expert AI classifying severe civic issues. Parse the provided issue report.
+Title: "${title}"
+Description: "${description}"
+
+Please return JSON matching this schema exactly:
+{
+  "description": "Enhanced rich description of the issue based on title, user description, and image context",
+  "issue": "A 1-3 word category name (e.g. Pothole, Flooding, Vandalism)",
+  "severity": "One of: Low, Medium, High, Critical",
+  "severityScore": number from 0 to 100,
+  "confidence": number from 0.0 to 1.0 (how sure you are),
+  "department": "One of: Electrical, Plumbing, Civil, Housekeeping, Lift, Security, Other",
+  "impactScope": "One of: Individual, Locality, Ward, City-wide",
+  "urgency": "One of: Immediate, Within 24hrs, Within a Week, Routine",
+  "priorityScore": number from 0 to 100,
+  "estimatedResolution": "One of: Same Day, 1-3 Days, 1 Week, 2-4 Weeks, Long-term Project",
+  "invalidImage": boolean (true if image is out of context, completely black, blurry, or irrelevant to a civic issue. If no image, false),
+  "invalidImageType": string ("BLURRY" or "OUT_OF_CONTEXT" if invalidImage is true, otherwise null)
+}
+  `;
+
+  const contents = [promptText];
+
+  if (fileBuffer && mimetype) {
+    contents.push({
+      inlineData: {
+        data: fileBuffer.toString('base64'),
+        mimeType: mimetype,
       }
-      return null;
-    };
-    const matchesSentinel = (value, sentinel) => Number(value) === sentinel;
-
-    const issueValue = valueOf(firstResult, ['predictedIssueType', 'issueType', 'issue', 'category']);
-    const severityScoreValue = valueOf(firstResult, ['severityScore', 'severity_score']);
-    const impactScopeValue = valueOf(firstResult, ['impactScope', 'impact_scope', 'impact']);
-    const urgencyValue = valueOf(firstResult, ['urgency']);
-    const priorityScoreValue = valueOf(firstResult, ['priorityScore', 'priority_score', 'priority']);
-    const departmentValue = valueOf(firstResult, ['suggestedDepartment', 'department']);
-    const estimatedResolutionValue = valueOf(firstResult, ['estimatedResolution', 'estimated_resolution', 'resolutionEta', 'resolution_eta']);
-
-    const allFieldsMatch = (sentinel) => (
-      matchesSentinel(issueValue, sentinel) &&
-      matchesSentinel(severityScoreValue, sentinel) &&
-      matchesSentinel(impactScopeValue, sentinel) &&
-      matchesSentinel(urgencyValue, sentinel) &&
-      matchesSentinel(priorityScoreValue, sentinel) &&
-      matchesSentinel(departmentValue, sentinel) &&
-      matchesSentinel(estimatedResolutionValue, sentinel)
-    );
-
-    const isBlurryImage = allFieldsMatch(300);
-    const isOutOfContext = allFieldsMatch(400);
-
-    if (isBlurryImage || isOutOfContext) {
-      // Return raw invalid response without normalization
-      return {
-        invalidImage: true,
-        invalidImageType: isBlurryImage ? 'BLURRY' : 'OUT_OF_CONTEXT',
-        description: firstResult.description || (isBlurryImage ? 'Blurry image' : 'Invalid'),
-      };
-    }
+    });
   }
-  
-  const parsed = Array.isArray(raw) ? (raw[0] || {}) : (raw && typeof raw === 'object' ? raw : {});
-  return normalizeN8nAnalysis(parsed, description);
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents,
+    config: {
+      responseMimeType: "application/json",
+    }
+  });
+
+  const parsed = JSON.parse(response.text);
+  return parsed;
 }
 
 function parseIntegerOrNull(value) {
@@ -262,64 +188,41 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
 
     }
 
-    let mlOk = !req.file;
-    let mlError = null;
-    let mlResult = null;
-    if (req.file) {
-      try {
-        console.log('[PREVIEW] Calling ML severity service...');
-        mlResult = await callMlSeverityService(req.file);
-        mlOk = true;
+    let geminiOk = true;
+    let geminiError = null;
+    let parsedResult = null;
 
-        console.log('[ML] Severity:', mlResult.severity);
-        console.log('[ML] Confidence:', mlResult.confidence);
-        console.log('[ML] Severity Score:', mlResult.severityScore);
-      } catch (mlErr) {
-        mlError = mlErr.response?.data?.detail || mlErr.message || 'ML_SERVICE_ERROR';
-        console.error('[PREVIEW] ❌ ML service failed:', mlError);
-      }
-    }
-
-    const mlSeverityAccepted =
-      mlResult &&
-      mlResult.severity &&
-      mlResult.confidence != null &&
-      mlResult.confidence >= ML_CONFIDENCE_THRESHOLD;
-
-    let webhookOk = true;
-    let webhookError = null;
-    let n8nResult = null;
     try {
-      console.log('[PREVIEW] Calling n8n webhook...');
-      n8nResult = await callN8nWebhook(title, description, imageUrl);
+      console.log('[PREVIEW] Calling Gemini API...');
+      const fileBuffer = req.file ? req.file.buffer : null;
+      const mimetype = req.file ? req.file.mimetype : null;
+      parsedResult = await callGeminiAnalysis(title, description, fileBuffer, mimetype);
       
-      // Check if n8n returned an invalid/blurry image response
-      if (n8nResult?.invalidImage === true) {
-        const invalidType = n8nResult.invalidImageType || 'OUT_OF_CONTEXT';
-        console.log(`[PREVIEW] ⚠️ n8n detected ${invalidType} IMAGE`);
+      // Check if Gemini returned an invalid/blurry image response
+      if (parsedResult?.invalidImage === true) {
+        const invalidType = parsedResult.invalidImageType || 'OUT_OF_CONTEXT';
+        console.log(`[PREVIEW] ⚠️ Gemini detected ${invalidType} IMAGE`);
         return res.status(200).json({
           success: true,
           data: {
             imageUrl,
             invalidImage: true,
             invalidImageType: invalidType,
-            description: n8nResult.description || (invalidType === 'BLURRY' ? 'Blurry image' : 'Invalid'),
+            description: parsedResult.description || (invalidType === 'BLURRY' ? 'Blurry image' : 'Invalid'),
           }
         });
       }
-    } catch (webhookErr) {
-      webhookOk = false;
-      const status = webhookErr.response?.status;
-      const isTimeout = webhookErr.code === 'ECONNABORTED' || webhookErr.message?.includes('timeout');
-      if (webhookErr.code === 'N8N_NOT_CONFIGURED') {
-        webhookError = 'N8N_NOT_CONFIGURED';
+    } catch (geminiErr) {
+      geminiOk = false;
+      if (geminiErr.code === 'GEMINI_NOT_CONFIGURED') {
+        geminiError = 'GEMINI_NOT_CONFIGURED';
       } else {
-        webhookError = isTimeout ? 'TIMEOUT' : (status ? 'HTTP_ERROR' : 'NETWORK_ERROR');
+        geminiError = geminiErr.message || 'API_ERROR';
       }
-      console.error('[PREVIEW] ❌ Webhook call failed:', webhookError, webhookErr.message);
+      console.error('[PREVIEW] ❌ Gemini call failed:', geminiError);
     }
 
-    const finalAnalysis = n8nResult || {
+    const finalAnalysis = parsedResult || {
       description,
       issue: null,
       severity: 'None',
@@ -327,63 +230,50 @@ router.post('/preview', aiPreviewLimiter, requireAuth(), upload.single('image'),
       department: null,
       severityScore: scoreFromSeverity('None'),
     };
+    
+    // Fallbacks just in case OpenAI gives something slightly off
+    const finalSeverity = normalizeSeverity(finalAnalysis.severity) || 'None';
+    const finalConfidence = parseConfidence(finalAnalysis.confidence) || null;
+    const finalSeverityScore = finalAnalysis.severityScore ?? scoreFromSeverity(finalSeverity);
 
-    if (mlSeverityAccepted) {
-      finalAnalysis.severity = mlResult.severity;
-      finalAnalysis.severityScore = mlResult.severityScore;
-      finalAnalysis.confidence = mlResult.confidence;
-    }
-
-    const source = !webhookOk
-      ? (mlSeverityAccepted ? 'n8n_error_ml_severity_only' : 'n8n_error_manual_review')
-      : (mlSeverityAccepted ? 'n8n_with_ml_severity_override' : 'n8n');
+    const source = !geminiOk ? 'manual_review' : 'gemini';
 
     const responseData = {
       imageUrl,
 
-      // Description priority: n8n/AI -> ML caption -> original
-      description: finalAnalysis?.description || mlResult?.description || description,
+      description: finalAnalysis?.description || description,
 
-      // Issue classification
       issueType: finalAnalysis?.issue || null,
       category: finalAnalysis?.issue || null,
       predictedIssueType: finalAnalysis?.issue || null,
 
-      // Severity
-      severity: finalAnalysis?.severity || 'None',
-      severityScore: finalAnalysis?.severityScore ?? null,
+      severity: finalSeverity,
+      severityScore: finalSeverityScore,
 
-      // Impact metrics
       impactScope: finalAnalysis?.impactScope || null,
       urgency: finalAnalysis?.urgency || null,
-      priorityScore: finalAnalysis?.priorityScore ?? null,
+      priorityScore: parseInt(finalAnalysis?.priorityScore) || null,
 
-      // Department routing
       department: finalAnalysis?.department || null,
       suggestedDepartment: finalAnalysis?.department || null,
 
-      // ML outputs
-      mlOk,
-      mlError,
-      mlSeverityAccepted: Boolean(mlSeverityAccepted),
-      mlSeverity: mlResult?.severity || null,
-      mlConfidence: mlResult?.confidence ?? null,
-      mlDescription: mlResult?.description || null,
+      // ML mock metrics for frontend compatibility
+      mlOk: geminiOk,
+      mlError: geminiError,
+      mlSeverityAccepted: geminiOk,
+      mlSeverity: finalSeverity,
+      mlConfidence: finalConfidence,
+      mlDescription: finalAnalysis?.description || null,
 
-      // AI metadata
-      confidence: finalAnalysis?.confidence,
+      confidence: finalConfidence,
 
-      // Resolution estimate
       estimatedResolution: finalAnalysis?.estimatedResolution || null,
 
-      // Source tracking
       source,
 
-      // Webhook status
-      webhookOk,
-      webhookError,
+      webhookOk: geminiOk,
+      webhookError: geminiError,
 
-      // Invalid image flags
       invalidImage: false,
       invalidImageType: null,
     };
